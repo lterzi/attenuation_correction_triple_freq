@@ -1,0 +1,9 @@
+dist
+build
+sdist
+*.egg-info
+*.png
+*.txt
+*.nc
+*.csv
+__pycache__
