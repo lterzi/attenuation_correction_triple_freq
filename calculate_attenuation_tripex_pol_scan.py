@@ -1,5 +1,6 @@
 '''
-this skript calculates the attenuation due to atmospheric gases for selected cases of the tripex-pol-scan campaign. Using the functions implemented in McRadar
+this skript calculates the attenuation due to atmospheric gases for selected cases of the tripex-pol-scan campaign using the functions implemented in McRadar.
+It also matches the reflectivities at the tip of the cloud to calculate attenuation due to liquid and snow using the method described in von Terzi et al 2022
 Author: Leonie von Terzi
 '''
 
@@ -7,32 +8,17 @@ from glob import glob
 import numpy as np
 import pandas as pd
 from sys import argv
-import atmFunc
 import xarray as xr
-#import attenuationLib as attLib
 import matplotlib.pyplot as plt
-from matplotlib import cm
-from mcradar import getHydroAtmAtt
+
 from cmcrameri import cm as colmap
 from attenuationFunctions import * 
-from matplotlib.colors import ListedColormap
-import matplotlib.colors as colors
-def maskData(variable,flag):
-# apply masks from LV2 dataset:
-    maskP = int('1000000000000000',2) #n points
-    maskC = int('0100000000000000',2) # correl
-    maskV = int('0010000000000000',2) # Variance
-    
-    variable = variable.where((flag.values & maskP) != maskP)
-    variable = variable.where((flag.values & maskC) != maskC)
-    variable =variable.where((flag.values & maskV) != maskV)
-    
-    return variable
+from mcradar import getHydroAtmAtt
+import atmFunc
 
-
-pathCN = '/archive/meteo/external-obs/juelich/cloudnet/jue/'
-pathData = '/archive/meteo/external-obs/juelich/' #'/scratch/l/L.Terzi/campaign_aux_data/'
-pathPro = pathData+'campaign_aux_data/tripex-pol-scan/wband_scan/processed/' # this contains the regridded and dealized spectra
+# define all necessary paths:
+pathData = '/archive/meteo/external-obs/juelich/' #base path of data
+pathCN = pathData+'cloudnet/jue/' # CN path
 pathRes = pathData + 'campaign_aux_data/tripex-pol-scan/wband_scan/resampled/' # this contains resampled moments of w-band
 
 date2start = '20220206'
@@ -40,9 +26,10 @@ date2end = '20220206'
 dateStart = pd.to_datetime(date2start); dateEnd = pd.to_datetime(date2end)
 dateList = pd.date_range(dateStart, dateEnd,freq='d')
 freq=[9.6e9,35.5e9,94.0e9]
-#TODO: get correct CN file and check that only the variables you have defined below are used!!!
+
+
 for date in dateList:
-	
+	'''
 	# calculate attenuation from gases using mcradar and cloudnet product
 	CN = xr.open_dataset('{path}{date}_juelich_categorize.nc'.format(path=pathCN,date=date.strftime('%Y%m%d')))
 	#results = getAtmAttenuation
@@ -67,19 +54,16 @@ for date in dateList:
 	CN1['atm_att_2way'] = 2*CN1['att_atmo'].cumsum(dim='range')
 	CN1.atm_att_2way.attrs['long_name'] = 'path integrated attenuation due to atmospheric gases, 2 way'
 	CN1.atm_att_2way.attrs['units'] = 'dBz'
-	#CN = CN[['lwp','category_bits','atm_att_2way']].rename({'height':'range'})
-	#CN = CN.interp({'time':data.time,'range':data.range})
-	#print(CN.atm_att_2way)
 	CN1.to_netcdf('test_files/{date}_cloudnet_attenuation.nc'.format(date=date.strftime('%Y%m%d')))		
-	
+	CN2.to_netcdf('test_files/{date}_cloudnet_attenuation2.nc'.format(date=date.strftime('%Y%m%d')))		
+	'''
 	CN1 = xr.open_dataset('test_files/{date}_cloudnet_attenuation.nc'.format(date=date.strftime('%Y%m%d')))		
-	#print(CN)
+	CN2 = xr.open_dataset('test_files/{date}_cloudnet_attenuation2.nc'.format(date=date.strftime('%Y%m%d')))		
+
 	#- read in radar Data and reindex to common grid, also, for easier handling: rename all variables to the same name and have freq as coordinate
-	ZENW = xr.open_dataset('{path}{date}_ZEN_moments_wband_scan.nc'.format(path=pathRes,date=date.strftime('%Y%m%d')))
-	ZENW = ZENW[['Ze','MDV','WIDTH','SK']]
-	ZENW = ZENW.expand_dims({'freq':np.array([94e9])})
-	ZENKa = getJoyrad(pathData,date,ZENW.range,ZENW.time,'Ka',offset=3.0) 
-	ZENX = getJoyrad(pathData,date,ZENW.range,ZENW.time,'X',offset=1.6) 
+	ZENW = getWband(pathRes,date,offset=0) 
+	ZENKa = getJoyrad(pathData,date,ZENW.range,ZENW.time,'Ka',offset=0) 
+	ZENX = getJoyrad(pathData,date,ZENW.range,ZENW.time,'X',offset=0.5) 
 	
 	#- merge triple-frequency dataset and calculated attenuation as well as other CN variables needed for quality flag generation:
 	#CN1 = CN[['atm_att_2way','temperature']].rename({'model_time':'time','model_height':'range'})
@@ -89,7 +73,7 @@ for date in dateList:
 	data = xr.merge([ZENKa,ZENX,ZENW,CN1,CN2])
 	print(data)
 	#quit()
-	data['calibration_offset'] = data.calibration_offset.fillna(0)
+	#data['calibration_offset'] = data.calibration_offset.fillna(0)
 	#- add gas attenuation to Ze
 	data['Ze'] = data.Ze + data.atm_att_2way + data.calibration_offset
 	data.Ze.attrs['units'] = 'dBz'
@@ -102,22 +86,22 @@ for date in dateList:
 	#print(dataMasked)
 	
 	#- select only cases where 1km above ML, and within predefined interval 30 to -10dB for Ka-W (Ka-Band reflectivity), -15 to 0 for X-Ka (Ka-Band reflectivity)
-	dataKaW = getInterval(data,interval=[-30,-10])
-	dataXKa = getInterval(data,interval=[-15,0])
+	dataXW = getInterval(data,interval=[-35,-10])
+	dataXKa = getInterval(data,interval=[-35,-5])
 	#quit()
 	
 	#- calculate offset
-	dataOffset = getOffset(dataKaW,dataXKa,date)
+	dataOffset = getOffset(dataXKa,dataXW,date)
 	#- now reindex offset to dataset 
 	dataOffset = dataOffset.reindex({'time':data.time},method='nearest',tolerance='5T')
 	data = xr.merge([data,dataOffset])
 	data['Ze'] = data.Ze + data.offsetMean
-	data.Ze.attrs['comments'] = 'corrected for absolute calibration error, gas attenuation, and attenuation due to hydrometeors. To remove gas and hydrometeor attenuation and calibration, simply subtract atm_att_2way, absolute_calibration and offsetMean from Ze'
+	data.Ze.attrs['comments'] = 'corrected for absolute calibration error, gas attenuation, and attenuation due to hydrometeors. To remove gas and hydrometeor attenuation and calibration, simply subtract atm_att_2way, calibration_offset and offsetMean from Ze'
 	print('calculated and applied offset')
 	print(data)
 	#- now make quality flag to be the same as Joses
 	data['quality_flag_offset'] = getFlags(data)
-	data = data[['Ze','MDV','WIDTH','SK','atm_att_2way','temperature','offsetMean','quality_flag_offset','offsetStd','refRadarStd','refRadarVar','validPoints','totalPoints','correlation','offsetVar','lwp']]
+	data = data[['Ze','MDV','WIDTH','SK','atm_att_2way','calibration_offset','temperature','offsetMean','quality_flag_offset','offsetStd','refRadarStd','refRadarVar','validPoints','totalPoints','correlation','offsetVar','lwp']]
 	print('generated quality flags')
 	data = globalAttr(data)
 	encDic = {x: {"zlib": True} for x in data}
@@ -125,7 +109,7 @@ for date in dateList:
 																							month = date.strftime('%m'),
 																							day = date.strftime('%d'),
 																							date = date.strftime('%Y%m%d')))
-	
+	#quit()
 	#- plot flags:
 	fig,ax = plt.subplots(nrows=5,figsize=(15,15),constrained_layout=True,sharex=True)
 	p1 = ax[0].pcolormesh(data.time,data.range,data.Ze.sel(freq=9.6e9).T,cmap = colmap.batlow,vmin=-30,vmax=20)
@@ -139,24 +123,24 @@ for date in dateList:
 	#ax[1].plot(data.time,data.offsetVar.sel(freq=94e9),c='C0',lw=2,label='W-Band')
 	#ax[1].plot(data.time,data.offsetVar.sel(freq=9.6e9),c='C1',lw=2,label='X-Band')
 	ax[1].plot(data.time,data.offsetMean.sel(freq=94e9),c='C0',lw=2,label='W-Band')
-	ax[1].plot(data.time,data.offsetMean.sel(freq=9.6e9),c='C1',lw=2,label='X-Band')
+	ax[1].plot(data.time,data.offsetMean.sel(freq=35.5e9),c='C1',lw=2,label='Ka-Band')
 	#ax[1].plot(data.time,data.offsetMean.sel(freq=94e9).where(~data.varFlag.sel(freq=94e9)),c='C0',lw=2,label='W-Band')
 	#ax[1].plot(data.time,data.offsetMean.sel(freq=9.6e9).where(~data.varFlag.sel(freq=9.6e9)),c='C1',lw=2,label='X-Band')
 	#ax[1].axhline(y=2,c='r',ls=':',lw=2)
 	ax[1].set_ylabel('Calculated offset',fontsize=20)
 	
 	ax[2].plot(data.time,data.offsetVar.sel(freq=94e9),c='C0',lw=2,label='W-Band')
-	ax[2].plot(data.time,data.offsetVar.sel(freq=9.6e9),c='C1',lw=2,label='X-Band')
+	ax[2].plot(data.time,data.offsetVar.sel(freq=35.5e9),c='C1',lw=2,label='Ka-Band')
 	ax[2].axhline(y=2,c='r',ls=':',lw=2)
 	ax[2].set_ylabel('variance of offset',fontsize=20)
 	
 	ax[3].plot(data.time,data.correlation.sel(freq=94e9),lw=2,label='W-Band')
-	ax[3].plot(data.time,data.correlation.sel(freq=9.6e9),lw=2,label='X-Band')
+	ax[3].plot(data.time,data.correlation.sel(freq=35.5e9),lw=2,label='Ka-Band')
 	ax[3].axhline(y=0.7,c='r',ls=':',lw=2)
 	ax[3].set_ylabel('correlation \n between Zes',fontsize=20)
 	
 	ax[4].plot(data.time,data.validPoints.sel(freq=94e9),lw=2,label='W-Band')
-	ax[4].plot(data.time,data.validPoints.sel(freq=9.6e9),lw=2,label='X-Band')
+	ax[4].plot(data.time,data.validPoints.sel(freq=35.5e9),lw=2,label='Ka-Band')
 	ax[4].axhline(y=300,c='r',ls=':',lw=2)
 	ax[4].set_ylabel('Number of \n valid points',fontsize=20)
 	for i,a in enumerate(ax):
