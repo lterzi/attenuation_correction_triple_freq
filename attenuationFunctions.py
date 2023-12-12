@@ -58,36 +58,35 @@ def generateOffsetDataset(midTime):
 							'totalPoints':offsetVar.copy(),
 							'correlation':offsetVar.copy(),
 							})
-	dataOffset['offsetMean'].attrs = {'description':'mean of offset calculated between X and Ka-Band (select freq=9.6e9) and W and Ka-Band (select freq=94e9) in 30 min window','units':'dB'}
-	dataOffset['offsetStd'].attrs = {'description':'standard deviation of offset calculated between X and Ka-Band (select freq=9.6e9) and W and Ka-Band (select freq=94e9) in 30 min window','units':'dB'}
-	dataOffset['offsetVar'].attrs = {'description':'variance of offset calculated between X and Ka-Band (select freq=9.6e9) and W and Ka-Band (select freq=94e9) in 30 min window','units':'dB'}
-	dataOffset['refRadarStd'].attrs = {'description':'standard deviation of Ka-Band Ze (reference radar) in 15 min window','units':'dB'}
-	dataOffset['refRadarVar'].attrs = {'description':'variance of Ka-Band Ze (reference radar) in 15 min window','units':'dB'}
-	dataOffset['validPoints'].attrs = {'description':'number of valid points in 15 min window','units':''}
-	dataOffset['totalPoints'].attrs = {'description':'number of total points in 15 min window','units':''}
-	dataOffset['correlation'].attrs = {'description':'correlation between X and Ka-Band Ze (select freq=9.6e9) and between W and Ka-band (select freq=94e9) 30 min window','units':''}
+	dataOffset['offsetMean'].attrs = {'description':'mean of offset calculated between X and Ka-Band (select freq=35.5e9) and X and W-Band (select freq=94e9) in 30 min window','units':'dB'}
+	dataOffset['offsetStd'].attrs = {'description':'standard deviation of offset calculated between X and Ka-Band (select freq=35.5e9) and X and W-Band (select freq=94e9) in 30 min window','units':'dB'}
+	dataOffset['offsetVar'].attrs = {'description':'variance of offset calculated between X and Ka-Band (select freq=35.5e9) and X and W-Band (select freq=94e9) in 30 min window','units':'dB'}
+	dataOffset['refRadarStd'].attrs = {'description':'standard deviation of W-Band Ze (reference radar) in 30 min window','units':'dB'}
+	dataOffset['refRadarVar'].attrs = {'description':'variance of X-Band Ze (reference radar) in 30 min window','units':'dB'}
+	dataOffset['validPoints'].attrs = {'description':'number of valid points in 30 min window','units':''}
+	dataOffset['totalPoints'].attrs = {'description':'number of total points in 30 min window','units':''}
+	dataOffset['correlation'].attrs = {'description':'correlation between X and Ka-Band Ze (select freq=35.5e9) and between X and W-band (select freq=94e9) 30 min window','units':''}
 	
 	return dataOffset						
 def getInterval(data,interval=[-30,-10]):
 	'''
 	get correct interval for Ze matching, 1km above melting layer and the interval defined in interval
 	input:
-	data: xr.dataset containing Ze with freq as coordinate
+	data: xr.dataset containing Ze with freq as coordinate and temperature as variable
 	interval: interval in which Ze are used 
 	returns:
 	data which is masked everwhere outside interval and below 1km above ML
 	'''
 	#- get range of 1km above ML:
-	#MLrange = getclosestTemp(data,273.15)
-	dataCold = data.where(data.range > 3000)#MLrange+1000)
+	MLrange = getclosestTemp(data,273.15)
+	dataCold = data.where(data.range > MLrange+1000)
 	
 	#- select only cases where Ze within predifend interval: -30 to -10dB for Ka-W (Ka-Band reflectivity), -15 to 0 for X-Ka (Ka-Band reflectivity)
-	#dataXKa = dataCold.where(dataCold.Ze.sel(freq=35.5e9)>-15)
-	#dataXKa = dataXKa.where(dataXKa.Ze.sel(freq=35.5e9)<-0)
-	
-	dataInt = dataCold.where(dataCold.Ze.sel(freq=35.5e9)>interval[0])
-	dataInt = dataInt.where(dataInt.Ze.sel(freq=35.5e9)<interval[1])
+	dataInt = dataCold.where(dataCold.Ze.sel(freq=9.6e9)>interval[0])
+	dataInt = dataInt.where(dataInt.Ze.sel(freq=9.6e9)<interval[1])
+
 	return dataInt
+
 def getTime(date):
 	'''
 	get time interval arrays in which to make the matching:
@@ -120,12 +119,12 @@ def getTime(date):
 	#endTime = pd.date_range(date + pd.offsets.Minute(120),date+pd.offsets.Day(1)-pd.offsets.Second(4),freq='1T')
 
 	return beginTime,midTime,endTime
-def getOffset(dataKaW,dataXKa,date):
+def getOffset(dataXKa,dataXW,date):
 	'''
 	calculates offset between Ze(Ka-Band) and Ze (x or W-Band)
 	input:
-	dataKaW: data in correct interval for KaW matching(from getInterval)
-	dataXKa: data in correct interval for XKa matching (from getInterval)
+	dataXKa: data in correct interval for XKa matching(from getInterval)
+	dataXW: data in correct interval for XW matching (from getInterval)
 	returns:
 	dataOffset: dataset containing offsets
 	'''
@@ -136,31 +135,33 @@ def getOffset(dataKaW,dataXKa,date):
 	dataOffset = generateOffsetDataset(midTime)
 	
 	for i,tstart,tmid,tend in zip(range(len(beginTime)),beginTime,midTime,endTime):
-		ZeKaWsel = dataKaW.Ze.sel(time=slice(tstart,tend))
+		ZeXWsel = dataXW.Ze.sel(time=slice(tstart,tend))
 		ZeXKasel = dataXKa.Ze.sel(time=slice(tstart,tend))
-		offsetW = ZeKaWsel.sel(freq=35.5e9) - ZeKaWsel.sel(freq=94e9)
-		offsetX = ZeXKasel.sel(freq=35.5e9) - ZeXKasel.sel(freq=9.6e9)
+		offsetW = ZeXWsel.sel(freq=9.6e9) - ZeXWsel.sel(freq=94e9)
+		offsetKa = ZeXKasel.sel(freq=9.6e9) - ZeXKasel.sel(freq=35.5e9)
 		dataOffset['offsetMean'].loc[tmid,94e9] = offsetW.mean()
 		dataOffset['offsetStd'].loc[tmid,94e9] = offsetW.std()
 		dataOffset['offsetVar'].loc[tmid,94e9] = offsetW.var()
 		dataOffset['validPoints'].loc[tmid,94e9] = offsetW.count()
 		dataOffset['totalPoints'].loc[tmid,94e9] = len(offsetW.values.flatten())
-		dataOffset['correlation'].loc[tmid,94e9] = xr.corr(ZeKaWsel.sel(freq=94e9),ZeKaWsel.sel(freq=35.5e9))
-		dataOffset['refRadarStd'].loc[tmid,94e9] = ZeKaWsel.sel(freq=35.5e9).std()
-		dataOffset['offsetMean'].loc[tmid,9.6e9] = offsetX.mean()
-		dataOffset['offsetStd'].loc[tmid,9.6e9] = offsetX.std()
-		dataOffset['offsetVar'].loc[tmid,9.6e9] = offsetX.var()
-		dataOffset['validPoints'].loc[tmid,9.6e9] = offsetX.count()
-		dataOffset['totalPoints'].loc[tmid,9.6e9] = len(offsetX.values.flatten())
-		dataOffset['correlation'].loc[tmid,9.6e9] = xr.corr(ZeXKasel.sel(freq=9.6e9),ZeXKasel.sel(freq=35.5e9))
-		dataOffset['refRadarStd'].loc[tmid,9.6e9] = ZeXKasel.sel(freq=35.5e9).std()
-		dataOffset['offsetMean'].loc[tmid,35.5e9] = 0
-		dataOffset['offsetStd'].loc[tmid,35.5e9] = 0
-		dataOffset['offsetVar'].loc[tmid,35.5e9] = 0
-		dataOffset['validPoints'].loc[tmid,35.5e9] = 0
-		dataOffset['totalPoints'].loc[tmid,35.5e9] = 0
-		dataOffset['correlation'].loc[tmid,35.5e9] = 0
-		dataOffset['refRadarStd'].loc[tmid,35.5e9] = 0
+		dataOffset['correlation'].loc[tmid,94e9] = xr.corr(ZeXWsel.sel(freq=9.6e9),ZeXWsel.sel(freq=94e9))
+		dataOffset['refRadarStd'].loc[tmid,94e9] = ZeXWsel.sel(freq=9.6e9).std()
+		
+		dataOffset['offsetMean'].loc[tmid,35.5e9] = offsetKa.mean()
+		dataOffset['offsetStd'].loc[tmid,35.5e9] = offsetKa.std()
+		dataOffset['offsetVar'].loc[tmid,35.5e9] = offsetKa.var()
+		dataOffset['validPoints'].loc[tmid,35.5e9] = offsetKa.count()
+		dataOffset['totalPoints'].loc[tmid,35.5e9] = len(offsetKa.values.flatten())
+		dataOffset['correlation'].loc[tmid,35.5e9] = xr.corr(ZeXKasel.sel(freq=9.6e9),ZeXKasel.sel(freq=35.5e9))
+		dataOffset['refRadarStd'].loc[tmid,35.5e9] = ZeXKasel.sel(freq=9.6e9).std()
+		
+		dataOffset['offsetMean'].loc[tmid,9.6e9] = 0
+		dataOffset['offsetStd'].loc[tmid,9.6e9] = 0
+		dataOffset['offsetVar'].loc[tmid,9.6e9] = 0
+		dataOffset['validPoints'].loc[tmid,9.6e9] = 0
+		dataOffset['totalPoints'].loc[tmid,9.6e9] = 0
+		dataOffset['correlation'].loc[tmid,9.6e9] = 0
+		dataOffset['refRadarStd'].loc[tmid,9.6e9] = 0
 		
 		print(tend)
 	
@@ -189,8 +190,8 @@ def getVarianceFlag(dataXKa,dataKaW,fillna=0):
 	'''
 	offsetVar = dataKaW.Ze.copy()*np.nan
 	print(offsetVar)
-	offsetVar.loc[9.6e9,:,:] = (dataXKa.Ze.sel(freq=35.5e9)-dataXKa.Ze.sel(freq=9.6e9)).rolling(time=int(np.floor(30*60/4)), min_periods=1, center=True).var()
-	offsetVar.loc[94e9,:,:] = (dataKaW.Ze.sel(freq=35.5e9)-dataKaW.Ze.sel(freq=94e9)).rolling(time=int(np.floor(30*60/4)), min_periods=1, center=True).var()
+	offsetVar.loc[35.5e9,:,:] = (dataXKa.Ze.sel(freq=9.6e9)-dataXKa.Ze.sel(freq=35.5e9)).rolling(time=int(np.floor(30*60/4)), min_periods=1, center=True).var()
+	offsetVar.loc[94e9,:,:] = (dataKaW.Ze.sel(freq=9.6e9)-dataKaW.Ze.sel(freq=94e9)).rolling(time=int(np.floor(30*60/4)), min_periods=1, center=True).var()
 	offsetVar = offsetVar.fillna(fillna)
 	#data['varFlag'] = data.varFlag.fillna(3)
 	varFlag = offsetVar.where(offsetVar > 2,0)# make everything that is smaller than 2 equal to 0 #(offsetVar>2).any(dim='range')
@@ -207,7 +208,7 @@ def getVarianceFlag(dataXKa,dataKaW,fillna=0):
 	#plt.show()
 	
 	varFlag.attrs = {'description':'flag where the variance of difference is larger than 2. True if larger than 2.'}
-	offsetVar.attrs = {'description':'variance of offset calculated in 30 min rolling window for Ka and X-Band (select freq=9.6e9) and Ka- and W-Band (select freq=94e9)','units':'dB2'}
+	offsetVar.attrs = {'description':'variance of offset calculated in 30 min rolling window for X and Ka-Band (select freq=35.5e9) and X- and W-Band (select freq=94e9)','units':'dB2'}
 	#data['varRolling'] = offsetVar
 	#data['varFlag'] = varFlag
 	return varFlag#offsetVar,varFlag
@@ -258,20 +259,17 @@ def getFlags(data):
 	dataKaW = getInterval(data,interval=[-30,-10])
 	dataXKa = getInterval(data,interval=[-15,0])
 	varFlag = getVarianceFlag(dataXKa,dataKaW)
-	print('calculated varFlag')
 	#varFlag2 = getVarianceFlag(dataXKa,dataKaW,fillna=3)
 	#- get correlation flag
 	corrFlag = data.correlation.where(data.correlation <= 0.7,1) #everything that is larger than 0.7 will be 1 (so True to be flagged)
 	corrFlag = corrFlag.where(data.correlation > 0.7,0) # everything that is smaller than 0.7 will be 0 (so false to be flagged)
 	corrFlag = -1*(corrFlag-1) # need to switch 0 and 1 because we want to have everything above 0.7 to not be flagged
 	corrFlag = corrFlag.expand_dims({'range':data.range})#.transpose('freq','time','range') # this is necessary because variance flag has range as dim!
-	print('calculated corrFlag')
 	#- get number of valid points flag
 	numFlag = data.validPoints.where(data.validPoints <= 300,1) #everything that is larger than 300 will be 1 (so True to be flagged)
 	numFlag = numFlag.where(data.validPoints > 300,0)# everything that is smaller than 300 will be 0 (so false to be flagged)
 	numFlag = -1*(numFlag-1) # need to switch 0 and 1 because we want to have everything above 0.7 to not be flagged
 	numFlag = numFlag.expand_dims({'range':data.range})#.transpose('freq','time','range')
-	print('calculated numFlag')
 	#- now lets get rainflag:
 	#- get cloudnet categories and select only liquid precipitation
 	drizzle_rain = getCategory(data.category_bits/data.category_bits,data.category_bits.astype('uint16'),1)
@@ -283,24 +281,21 @@ def getFlags(data):
 	rain = rain.where(rain<1,1)
 	rainFlag = rain.where(rain==1,np.nan).any(dim='range') # have flag when there is rain detected in any range gate
 	rainFlag = rainFlag.expand_dims({'range':data.range,'freq':data.freq})#.transpose('freq','time','range')
-	print('calculated rainFlag')
 	#- get lwp flag from CN, flag st to true when lwp > 200
 	lwpFlag = data.lwp.where(data.lwp <= 200,1)# make everything that is larger than 200 equal to 1 #(offsetVar>2).any(dim='range')
 	lwpFlag = lwpFlag.where(data.lwp > 200,0)# make everything smaller than 200 equal to 0
 	lwpFlag = lwpFlag.expand_dims({'range':data.range,'freq':data.freq})#.transpose('freq','time','range')
-	pritn('calculated lwpFlag')
 	#- now make it into bits:
 	lwpFlagBit = np.array(lwpFlag.transpose('freq','time','range').values.astype('uint16'))<<6
 	rainFlagBit = np.array(rainFlag.transpose('freq','time','range').values.astype('uint16'))<<7
 	varFlagBit = np.array(varFlag.transpose('freq','time','range').values.astype('uint16'))<<13
 	corrFlagBit = np.array(corrFlag.transpose('freq','time','range').values.astype('uint16'))<<14
 	numFlagBit = np.array(numFlag.transpose('freq','time','range').values.astype('uint16'))<<15
-	print('made everything binary')
 	# add all flags together and put it back into an xarray dataarray
 	finalFlag = rainFlagBit + lwpFlagBit + varFlagBit + corrFlagBit + numFlagBit 
 	finalFlag = xr.DataArray(finalFlag,dims=('freq','time','range'),coords={'freq':data.freq,'time':data.time,'range':data.range})
 	finalFlag.attrs = {'description':'quality flag indicating reliability of the offset correction. ',
-						'comments':'For W-Band offset flags select freq=94e9, for X-Band offset flags select freq=9.6e9. Bits 0 to 5: empty; Bit 6: 0 if the liquid water path is less than 200 g m-2, 1 if the liquid water path is greater than 200 g m-2; Bit 7: 0 no rain, 1 rain; Bits 8 to 12: empty; Bit 13: 0 if the variance of the DWR_X_Ka within a 30 minutes time window is less than 2 dB**2, 1 if the DWR variance is greater than 2 dB**2; Bit 14: 0 if correlation of X and Ka Band reflectivities is larger than 0.7, 1 if correlation is less than 0.7; Bit 15: 0 if the number of points used to calculate the offset is greater than 300, 1 if the number of points is less than 300. If Bit 14 or higher is set, we recommend not to use the calculated offsets but e.g. rather interpolate between time periods with high-quality offset estimates.'}
+						'comments':'For W-Band offset flags select freq=94e9, for Ka-Band offset flags select freq=35.5e9. Bits 0 to 5: empty; Bit 6: 0 if the liquid water path is less than 200 g m-2, 1 if the liquid water path is greater than 200 g m-2; Bit 7: 0 no rain, 1 rain; Bits 8 to 12: empty; Bit 13: 0 if the variance of the DWR_X_Ka within a 30 minutes time window is less than 2 dB**2, 1 if the DWR variance is greater than 2 dB**2; Bit 14: 0 if correlation of X and Ka/W Band reflectivities is larger than 0.7, 1 if correlation is less than 0.7; Bit 15: 0 if the number of points used to calculate the offset is greater than 300, 1 if the number of points is less than 300. If Bit 14 or higher is set, we recommend not to use the calculated offsets but e.g. rather interpolate between time periods with high-quality offset estimates.'}
 	#data['offset_flag'] = finalFlag
 	'''
 	fig,ax=plt.subplots(nrows=5,figsize=(20,25),sharex=True)
@@ -378,6 +373,28 @@ def getJoyrad(pathData,date,rangeRef,timeRef,band,offset=0):
 	data = data.reindex({'range':rangeRef},method='nearest',tolerance=15)
 	data = data.reindex({'time':timeRef},method='nearest',tolerance='4S').expand_dims({'freq':np.array([freq])}).rename({'Zg':'Ze','VELg':'MDV','RMSg':'WIDTH','SKWg':'SK'})
 	data['calibration_offset'] = xr.DataArray(data=offset,dims=['freq'],coords={'freq':np.array([freq])})
+	data['calibration_offset'].attrs = {'description':'absolute calibration offset obtained with raincoat by comparing radar Ze with forward simulated Ze from Parsivel DSD measurements','units':'dB','comment':'positive means radar is smaller than parsivel'}
+	
+	return data
+	
+def getWband(pathData,date,offset=0):
+	'''
+	get Ka or X Band data with correct shape
+	input:
+	pathData: path where data is
+	date: date to process (pd. datetime)
+	rangeRef: reference of range to reindex
+	timeRef: reference of time (pd daterange)
+	band: X or Ka
+	offset: calibration offset calculated with raincoat
+	returns:
+	data: dataset containing radar moments and Ze with calibration offset
+	'''
+	
+	data = xr.open_dataset('{path}{date}_ZEN_moments_wband_scan.nc'.format(path=pathData,date=date.strftime('%Y%m%d')))
+	print(data)
+	data = data[['Ze','MDV','WIDTH','SK']].expand_dims({'freq':np.array([94e9])}) 
+	data['calibration_offset'] = xr.DataArray(data=offset,dims=['freq'],coords={'freq':np.array([94e9])})
 	data['calibration_offset'].attrs = {'description':'absolute calibration offset obtained with raincoat by comparing radar Ze with forward simulated Ze from Parsivel DSD measurements','units':'dB','comment':'positive means radar is smaller than parsivel'}
 	
 	return data
